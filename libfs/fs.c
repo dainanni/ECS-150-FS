@@ -41,7 +41,8 @@ struct Root{
 
 struct Superblock super;// superblock
 struct Fatblock* Fatarray; //FAT array to store all FAT blocks
-struct Root* root; //root array to hold file entries
+struct Root root[128];
+static int diskCheck = 0; //Global static variable to check 
 
 
 
@@ -52,10 +53,13 @@ int fs_mount(const char *diskname)
 	
 	if(block_disk_open(diskname) == -1) //If opening virtual disk block fails
 		return -1; //Failure in mounting FS
+	
+	else if(diskCheck != 0)
+		return -1;
 
 	else
 	{
-		if(block_read(0, &super) == -1) //Reading content of 1st virtual block into superblock
+		if(block_read(0, (void*)&super) == -1) //Reading content of 1st virtual block into superblock
 			return -1;//failure
 
 		for(int i=0; i<8; i++) //traversal to compare signature of superblock with required ECS150FS file system signature
@@ -65,18 +69,20 @@ int fs_mount(const char *diskname)
 		if(!(block_disk_count() == super.blockTotal)) //Total amount of virtual blocks check
 			return -1; //Failed check
 		
-		Fatarray = (struct Fatblock*) malloc((super.fatBlock)*BLOCK_SIZE); //Allocating memory for the Fat array to store an array of structs of BLOCK SIZE with number of fatblocks supplied by the superblock 	
+		Fatarray = (struct Fatblock*) malloc((super.fatBlock)*BLOCK_SIZE); //Allocating memory for the Fatarray to store an array of structs of BLOCKSIZE with number of fatblocks from superblock 	
 		
-		root =  (struct Root*) malloc(sizeof(struct Root)*FS_FILE_MAX_COUNT); //Allocating memory for roo dir
+		//root =  (struct Root*) malloc(sizeof(struct Root)*FS_FILE_MAX_COUNT); //Allocating memory for roo dir
 
 		for(int index=0; index<super.fatBlock; index++)
-			if((block_read((index+1), (&Fatarray[(BLOCK_SIZE/2)*index]))) == -1) //Reading content of virtual block into fatblock array
+			if((block_read((index+1),(void*)(&Fatarray[(BLOCK_SIZE/2)*index]))) == -1) //Reading content of virtual block into fatblock array
 				return -1;//failure
 
-		if((block_read((super.rootIndex), root)) == -1) //Reading content of virtual block into root
+		if((block_read((super.rootIndex),(void*)&root)) == -1) //Reading content of virtual block into root
 			return -1;//failure
+		
 	}
-
+	
+	diskCheck++;// Set flag to 1 to indicate Mount done
 	return 0;//Success
 }
 
@@ -85,21 +91,26 @@ int fs_umount(void)
 {
 	/* TODO: Phase 1 */
 
-	if(block_write(0, &super) == -1) //Writing out superblock to virtual disk
+	if(diskCheck != 1)//If no disk mounted
+		return -1;
+
+	if(block_write(0, (void*)&super) == -1) //Writing out superblock to virtual disk
 		return -1;
 
 	for(int index=0; index<super.fatBlock; index++)
-		if((block_write((index+1), (&Fatarray[(BLOCK_SIZE/2)*index]))) == -1) //Writing content into virtual block from fatblock array
+		if((block_write((index+1),(void*)(&Fatarray[(BLOCK_SIZE/2)*index]))) == -1) //Writing content into virtual block from fatblock array
 			return -1;//failure
 
-	if(block_write((super.rootIndex), root) == -1) //Writing out rootblock to virtual disk
+	if(block_write((super.rootIndex),(void*)&root) == -1) //Writing out rootblock to virtual disk
 		return -1; //failure
 
 	free(Fatarray); //Deallocating memory set for Fat array
-	free(root); //Deallocating memory set for root dir array
+	//free(root); //Deallocating memory set for root dir array
 
 	if(block_disk_close() == -1) //If virtual disk was not opened 
 		return -1; //Failure	
+
+	diskCheck = 0;// set flag back to 0 or unmounted status
 
 	return 0; //Success
 }
@@ -112,7 +123,7 @@ int fs_info(void)
 	int zeroCount = 0; //Count for Fat block zeros
 	int nullCount = 0; //Count for Root directory null filename entries
 
-	if(block_disk_close() == -1) //If virtual disk wasn't opened
+	if(diskCheck == 0) //If disk wasn't mounted
 		return -1;
 	else
 	{
@@ -148,7 +159,7 @@ int fs_create(const char *filename)
 {
 	/* TODO: Phase 2 */
 
-
+	
 
 
 	return 0;
