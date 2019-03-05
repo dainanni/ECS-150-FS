@@ -33,7 +33,7 @@ struct Root{
 
 	char filename[16]; //16 byte file name string
 	uint32_t fileSize; //4 bytes
-	uint16_t dataIndex; //2 bytes for ind ex of first data block
+	uint16_t dataIndex; //2 bytes for index of first data block
 	char rootPadding[10]; //10 unused bytes of padding
 
 }__attribute__((packed)); //packed attributes to pack memory blocks into one continuous chunk
@@ -94,7 +94,7 @@ int fs_umount(void)
 	if(diskCheck != 1)//If no disk mounted
 		return -1;
 
-	if(block_write(0, (void*)&super) == -1) //Writing out superblock to virtual disk
+	else if(block_write(0, (void*)&super) == -1) //Writing out superblock to virtual disk
 		return -1;
 
 	for(int index=0; index<super.fatBlock; index++)
@@ -159,27 +159,101 @@ int fs_create(const char *filename)
 {
 	/* TODO: Phase 2 */
 
-	
+	int fileCount = 0; //used to keep track of number of files in the root dir
 
+	if(!filename) //filename is NULL
+		return -1; //Failure
 
-	return 0;
+	else if((strlen(filename) + 1) > FS_FILENAME_LEN) //Length of filename exceeds max limit
+		return -1;
+
+	for(int i=0; i<FS_FILE_MAX_COUNT; i++)
+	{
+		if(strcmp(root[i].filename, filename) == 0) //If filename already exists
+			return -1;
+		
+		else if(root[i].filename[0] != '\0')
+		{
+			fileCount++; //Counts number of files that exist in the fileSystem
+			
+			if(fileCount >= FS_FILE_MAX_COUNT) //Max file count reached
+				return -1;
+		}	
+
+		else if(root[i].filename[0] == '\0')//Empty space found
+		{
+			strcpy(root[i].filename, filename); //Copies given filename to empty space	
+			root[i].fileSize = 0; //Empty file created of size 0
+			root[i].dataIndex = 0xFFFF; //FAT_EOC assigned to data start index of this file
+			break; //end create operation once file has been added
+		}
+	}
+
+	return 0; //Success
 }
 
 int fs_delete(const char *filename)
 {
 	/* TODO: Phase 2 */
+	
+	int notCount = 0;//Count of unmatched filenames
+	int index = 0; //Flag to keep track of changing indices
+	int temp = 0; //Temporary variable to store FAT index info
+
+	if(!filename)//filename is invalid
+		return -1;
+			
+	else if((strlen(filename) + 1) > FS_FILENAME_LEN) //Length of filename exceeds max limit
+		return -1;
+	
+	for(int i=0; i<FS_FILE_MAX_COUNT; i++)
+	{
+		if(strcmp(root[i].filename, filename) != 0) //If filename not found	
+		{
+			notCount++;
+
+			if(notCount >= FS_FILE_MAX_COUNT) //If filename isn't found in entire root dir
+				return -1; //Failure
+		}
+
+		else if(strcmp(root[i].filename, filename) == 0) //If file is found in file system
+		{	
+			root[i].filename[0] = '\0'; //Setting filename to empty null
+		      	
+			index = root[i].dataIndex; //Set start data block index
+
+			while(Fatarray[index].wordFat != 0xFFFF)// If FAT_EOC Encountered then break
+			{
+				Fatarray[index].wordFat = temp;
+				Fatarray[index].wordFat = 0;//sets data blocks associated with file to be deleted to 0
+				index = temp;// stores index using temp variable				
+			}
+
+			break; //Exit loop after delete complete
+		}
+	}
 
 
-
-	return 0;
+	return 0; //success
 }
 
 int fs_ls(void)
 {
 	/* TODO: Phase 2 */
 
+	if(diskCheck == 0) //Disk wasn't mounted
+		return -1;//Failure
 
-	return 0;
+	printf("FS Ls:\n");
+		
+	for(int i=0; i<FS_FILE_MAX_COUNT; i++)
+	{
+		if(root[i].filename[0] != '\0')//Existing file in root directory
+			printf("file: %s, size: %d, data_blk: %d\n", root[i].filename, root[i].fileSize, root[i].dataIndex); //Prints all required ls info
+
+	}
+
+	return 0; //success
 
 }
 
