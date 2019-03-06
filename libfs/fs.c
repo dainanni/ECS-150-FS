@@ -39,11 +39,43 @@ struct Root{
 }__attribute__((packed)); //packed attributes to pack memory blocks into one continuous chunk
 
 
-struct Superblock super;// superblock
-struct Fatblock* Fatarray; //FAT array to store all FAT blocks
-struct Root root[128];
+struct Filedes{
+
+	int rootIndex; //Root index position
+	size_t offset; //file offset
+
+}__attribute__((packed));
+
+
+
+
+static struct Superblock super;// superblock
+static struct Fatblock* Fatarray; //FAT array to store all FAT blocks
+static struct Root root[FS_FILE_MAX_COUNT]; //Root dir array
+static struct Filedes Fdarray[FS_OPEN_MAX_COUNT]; //File descriptor table array
 static int diskCheck = 0; //Global static variable to check 
 
+
+
+
+/*Helper Functions*/
+
+
+int fd_valid(int fd)
+{
+	if(fd <0 || fd >31) //Check if fd is invalid
+                return -1;// Failure
+	
+	else if(Fdarray[fd].rootIndex == -1) // file descriptor not opened
+		return -1;
+
+	return 0; //File descriptor found and is valid
+
+}
+
+
+
+/*Main Functions*/
 
 
 int fs_mount(const char *diskname)
@@ -79,6 +111,9 @@ int fs_mount(const char *diskname)
 
 		if((block_read((super.rootIndex),(void*)&root)) == -1) //Reading content of virtual block into root
 			return -1;//failure
+
+		for(int i=0; i<FS_OPEN_MAX_COUNT; i++)//FDarray initialization
+			Fdarray[i].rootIndex = -1; //initialize fd to invalid
 		
 	}
 	
@@ -261,34 +296,112 @@ int fs_open(const char *filename)
 {
 	/* TODO: Phase 3 */
 
+	int notCount = 0;//Count of unmatched filenames
+	int openCount = 0; //Count of open file descriptors
+	int FileDesc = -1; // File Descriptor return value
 
-	return 0;
+	if(!filename || (strlen(filename) + 1) > FS_FILENAME_LEN) //Filename is invalid or too long
+		return -1; //Failure
+
+	for(int i=0; i<FS_FILE_MAX_COUNT; i++)
+	{
+		if(strcmp(root[i].filename, filename) != 0) //Filename not found
+		{
+			notCount++;
+	
+			if(notCount >= FS_FILE_MAX_COUNT) //If filename isn't found in entire root dir
+				return -1; //Failure
+		}
+
+		else if(strcmp(root[i].filename, filename) == 0) //Filename found
+		{
+			for(int fd=0; fd < FS_OPEN_MAX_COUNT; fd++)
+			{
+				if(Fdarray[fd].rootIndex != -1) //If file descriptor is already open
+				{
+					openCount++;
+
+					if(openCount >= FS_OPEN_MAX_COUNT) //If 32 file descriptors are already open
+						return -1; //Failure
+
+				}
+				
+				else if(Fdarray[fd].rootIndex == -1) //First empty file descriptor found
+				{
+					Fdarray[fd].rootIndex = i; //Set value of rootIndex at file descriptor position to file index
+					Fdarray[fd].offset = 0; //initialize offset to 0
+					FileDesc = fd;// Assigning file descriptor for return
+					break;
+				}
+
+			}			
+			
+			break;
+		}
+
+	}
+
+	return FileDesc; //Return file descriptor upon succesful open
 }
 
 int fs_close(int fd)
 {
 	/* TODO: Phase 3 */
 
-	return 0;
+	if(fd_valid(fd) == -1) //Check for validity of file descriptor
+		return -1; //Failure
+
+	else
+	{
+
+		Fdarray[fd].rootIndex = -1; //Setting rootIndex back to empty/NULL at file descriptor position
+		Fdarray[fd].offset = 0; //Setting offset back to 0;
+
+	}
+
+	return 0; //Success in closing file descriptor
 }
 
 int fs_stat(int fd)
 {
 	/* TODO: Phase 3 */
 
-	return 0;
+	int size = 0; //File size to be returned
+
+	if(fd_valid(fd) == -1) //Check for validity of file descriptor
+		return -1; //Failure
+	
+	else
+		size = root[Fdarray[fd].rootIndex].fileSize; //Assigning file size using index value of file in root directory pointed to by given file descriptor
+
+	return size; //Succesful size return
 }
 
 int fs_lseek(int fd, size_t offset)
 {
 	/* TODO: Phase 3 */
 
-	return 0;
+	if(fd_valid(fd) == -1) //Check for validity of file descriptor
+		return -1; //Failure	
+
+	else if(offset > root[Fdarray[fd].rootIndex].fileSize) //Check if offset is out of bounds
+		return -1;// Failure
+
+	else
+		Fdarray[fd].offset = offset; //Changing file descriptor associated file offset value to given offset value
+
+	return 0; //Success
 }
 
 int fs_write(int fd, void *buf, size_t count)
 {
 	/* TODO: Phase 4 */
+	
+	if(fd_valid(fd) == -1) //Check for validity of file descriptor
+		return -1; //failure
+
+
+
 
 	return 0;
 }
@@ -296,6 +409,14 @@ int fs_write(int fd, void *buf, size_t count)
 int fs_read(int fd, void *buf, size_t count)
 {
 	/* TODO: Phase 4 */
+	
+	if(fd_valid(fd) == -1) //Check for validity of file descriptor
+		return -1; //Failure
+
+	root[Fdarray[fd].rootIndex] //File we need to read
+
+
+
 
 	return 0;
 }
