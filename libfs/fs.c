@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <string.h>
+#include <math.h>
 
 #include "disk.h"
 #include "fs.h"
@@ -61,7 +62,7 @@ static int diskCheck = 0; //Global static variable to check
 /*Helper Functions*/
 
 
-int fd_valid(int fd)
+static int fd_valid(int fd)
 {
 	if(fd <0 || fd >31) //Check if fd is invalid
                 return -1;// Failure
@@ -73,7 +74,14 @@ int fd_valid(int fd)
 
 }
 
+static int sizeCheck(int fd, size_t offset)
+{
 
+	if(offset < 0 || offset > root[Fdarray[fd].rootIndex].fileSize) //Checks if offset goes out of bounds
+		return -1; //Failure
+
+	return 0; //Success
+}
 
 /*Main Functions*/
 
@@ -384,7 +392,7 @@ int fs_lseek(int fd, size_t offset)
 	if(fd_valid(fd) == -1) //Check for validity of file descriptor
 		return -1; //Failure	
 
-	else if(offset > root[Fdarray[fd].rootIndex].fileSize) //Check if offset is out of bounds
+	else if(sizeCheck(fd, offset) == -1)//Check if offset is out of bounds
 		return -1;// Failure
 
 	else
@@ -396,28 +404,170 @@ int fs_lseek(int fd, size_t offset)
 int fs_write(int fd, void *buf, size_t count)
 {
 	/* TODO: Phase 4 */
-	
+
+	size_t offset = 0; //Variable to keep track of current file's offset
+	size_t readCount = 0; //Variable to keep track of 
+	uint16_t startIndex = 0; //Data block start index to read from
+	uint32_t fileSize = 0; //File size of file to be read in
+
+	char* currBuf; //Temp buffer
+
 	if(fd_valid(fd) == -1) //Check for validity of file descriptor
 		return -1; //failure
 
+	offset = Fdarray[fd].offset; //File offset
+	startIndex = root[Fdarray[fd].rootIndex].dataIndex; // Data block that file read starts from
+	fileSize = root[Fdarray[fd].rootIndex].fileSize; //File Size data of file to be read in
 
+	if(offset == BLOCK_SIZE) //If offset is at end of file
+		return 0; //No bytes read from file 
 
+	if(sizeCheck(fd, offset) == -1) //Check offset bounds
+		return -1; //Failure
 
-	return 0;
+	currBuf = malloc(sizeof(char*)*BLOCK_SIZE); //Allocating memory for uninitialized temp buffer
+	
+	if(fileSize <= BLOCK_SIZE) //If offset starts at beginning of file to be read and in middle of file
+	{
+		
+		for(int i=0; i<super.dataTotal; i++)
+		{
+			if(Fatarray[i].wordFat == 0)
+			{
+				startIndex = i;	
+				break;
+			}
+		}
+		
+		block_read((super.rootIndex + startIndex + 1), (void*)currBuf); // Reads into desired block by taking root start index and going into data blocks 
+
+		if((offset+count) > BLOCK_SIZE)
+		{
+			offset = BLOCK_SIZE; //Put offset to end of block
+			readCount = (BLOCK_SIZE - offset);// update count of bytes read
+		}
+
+		else if((offset+count) <= BLOCK_SIZE)
+		{
+			offset = offset + count; //Update offset
+			readCount = count;
+		}
+
+		startIndex = Fatarray[startIndex].wordFat;
+
+		block_write((super.rootIndex + startIndex + 1), (void*)buf);
+		root[Fdarray[fd].rootIndex].dataIndex = startIndex;
+		Fdarray[fd].offset = offset; //Update global fdarray offset value       
+	}
+	
+	readCount = count;
+	free(currBuf); //Deallocate assigned memory for temp buffer
+
+	return readCount;
 }
 
 int fs_read(int fd, void *buf, size_t count)
 {
 	/* TODO: Phase 4 */
+
+	size_t offset = 0; //Variable to keep track of current file's offset
+	size_t readCount = 0; //Variable to keep track of 
+	uint16_t startIndex = 0; //Data block start index to read from
+	uint32_t fileSize = 0; //File size of file to be read in
 	
+	char* currBuf; //current buffer to be used to keep count
+
 	if(fd_valid(fd) == -1) //Check for validity of file descriptor
 		return -1; //Failure
 
-	root[Fdarray[fd].rootIndex] //File we need to read
 
+	offset = Fdarray[fd].offset; //File offset
+	startIndex = root[Fdarray[fd].rootIndex].dataIndex; // Data block that file read starts from
+	fileSize = root[Fdarray[fd].rootIndex].fileSize; //File Size data of file to be read in
 
+	if(offset == BLOCK_SIZE) //If offset is at end of file
+		return 0; //No bytes read from file 
 
+	if(sizeCheck(fd, offset) == -1) //Check offset bounds
+		return -1; //Failure
 
-	return 0;
+	currBuf = malloc(sizeof(char*)*BLOCK_SIZE); //Allocating memory for uninitialized temp buffer
+
+	if(fileSize <= BLOCK_SIZE) //If offset starts at beginning of file to be read and in middle of file
+	{
+
+		block_read((super.rootIndex + startIndex + 1), (void*)currBuf); // Reads into desired block by taking root start index and going into data blocks 
+
+		if((offset+count) > BLOCK_SIZE)
+		{
+			offset = BLOCK_SIZE; //Put offset to end of block
+			readCount = (BLOCK_SIZE - offset);// update count of bytes read
+		}
+
+		else if((offset+count) <= BLOCK_SIZE)
+		{
+			offset = offset + count; //Update offset
+			readCount = count; 
+		}
+
+		memcpy(buf, (void*) currBuf, readCount); //Copy memory chunk into user buf
+		Fdarray[fd].offset = offset; //Update global fdarray offset value	
+	}
+
+	else if(fileSize > BLOCK_SIZE) // File is bigger than block size so offset spans multiple data blocks
+	{
+		
+
+		if((offset+count) <= BLOCK_SIZE)
+		{
+			offset = offset + count; //Update offset
+			readCount = count;
+			block_read((super.rootIndex + startIndex + 1), (void*)currBuf); // Reads into desired block by taking root start index and going into data blocks 
+		}
+
+		else if((offset + count) > BLOCK_SIZE)
+		{	
+			offset = (offset % BLOCK_SIZE); //Find relative offset
+			size_t rem_block = BLOCK_SIZE - offset; //Rmaining block size in current block
+
+			if(offset >= BLOCK_SIZE)
+				startIndex = floor((offset/BLOCK_SIZE)); //Calculate new startIndex
+
+			size_t tempCount = count;
+
+			while(count > rem_block)
+			{
+				if(tempCount<= rem_block) //If remaining area in current block is within the block
+				{
+					block_read((super.rootIndex + startIndex + 1), (void*)currBuf);
+					memcpy(buf, (void*) currBuf, tempCount);//Copy last remaining bytes in
+					break;//Complete
+				}
+
+				else if(offset != 0)
+				{
+					block_read((super.rootIndex + startIndex + 1), (void*)currBuf); //Read entire block in
+					memcpy(buf, ((void*) (currBuf + offset)), rem_block); //Copies the remaining number of bytes in the current block 
+					buf = buf + rem_block;
+				}
+
+				else if(offset == 0)
+				{
+					block_read((super.rootIndex + startIndex + 1), (void*) buf);
+					buf = buf + rem_block;	
+				}
+				tempCount -= rem_block;
+				offset = 0;
+				startIndex = Fatarray[startIndex].wordFat; //Update index that fatarray index points to
+				rem_block = BLOCK_SIZE; //Update rem_block
+			}
+
+			readCount = count;
+		}
+
+	}
+	
+	free(currBuf);//Deallocate memory assigned to temp buffer
+	return readCount; //Returns number of bytes actually read
 }
 
